@@ -62,8 +62,3 @@ figures/      SHAP plots, model diagnostics, dashboard screenshots
 
 🚧 In progress — data pipeline and modeling stage.
 
-## Author
-
-Pragya Chaturvedi — built as part of independent research toward graduate
-study applications (Fall 2027), extending prior work on fairness-aware ML
-(COMPAS) and fundamentals data pipelines (SEC EDGAR / Yahoo Finance).
