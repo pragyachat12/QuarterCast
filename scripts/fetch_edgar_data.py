@@ -33,7 +33,7 @@ USER_AGENT = "username user@mail.example.com"
 
 HEADERS = {"User-Agent": USER_AGENT}
 UNIVERSE_PATH = "data/company_universe.csv"
-OUTPUT_PATH = "output/edgar_quarterly_eps.csv"
+OUTPUT_PATH = "edgar_quarterly_eps.csv"
 CACHE_DIR = "edgar_cache"  # raw JSON cache so re-runs don't re-hit EDGAR
 
 # EDGAR uses 10-digit zero-padded CIK
