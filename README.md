@@ -1,6 +1,6 @@
 # QuarterCast — Earnings Surprise Forecasting with Explainable ML
 
-Predicting the magnitude of quarterly earnings surprises across 100+ S&P 500
+Predicting the magnitude of quarterly earnings surprises across 110 S&P 500
 companies (multi-sector), using fundamentals data from SEC EDGAR, gradient
 boosting regression, and SHAP for interpretability.
 
@@ -23,17 +23,23 @@ seasonal earnings pattern.
 
 ## Method overview
 
-1. **Universe**: 112 S&P 500 companies, sector-stratified (proportional to
-   GICS sector representation) to avoid bias toward any one industry.
+1. **Universe**: 110 S&P 500 companies (112 sampled, 2 excluded — banks
+   without standard revenue reporting), sector-stratified proportional to
+   GICS sector representation to avoid bias toward any one industry.
 2. **Target**: SUE — surprise standardized by each company's trailing 2-year
-   surprise volatility, computed from EDGAR XBRL data.
-3. **Features**: revenue growth, margin trends, leverage ratios, prior
-   surprise autocorrelation, sector indicators (sector-normalized where
-   appropriate).
-4. **Models**: Ridge regression baseline → LightGBM/XGBoost regressor.
-5. **Evaluation**: time-aware train/val/test split (no random shuffling —
-   split by fiscal period to avoid lookahead leakage). RMSE/MAE plus
-   directional accuracy.
+   surprise volatility, computed from EDGAR XBRL data (2009–2026). The
+   standardization denominator is floored at its 5th percentile to prevent
+   division-by-near-zero artifacts for companies with unusually stable
+   surprise histories, and the result is winsorized at ±5.
+3. **Features**: YoY/QoQ revenue growth, net margin and margin change,
+   prior-quarter surprise (autocorrelation signal), sector-normalized
+   z-scores for margin and growth, sector indicator.
+4. **Models**: Ridge regression baseline → LightGBM regressor, trained with
+   a **time-aware split** — train 2010–2019, validate 2020–2021 (includes
+   COVID as a stress test), test 2022–2025. No random shuffling, to avoid
+   lookahead leakage.
+5. **Evaluation**: RMSE, MAE, and directional accuracy (did we get
+   beat-vs-miss right, independent of magnitude error).
 6. **Interpretability**: SHAP values — global feature importance and
    per-sector comparison, plus local explanations for notable predictions.
 
@@ -52,6 +58,10 @@ figures/      SHAP plots, model diagnostics, dashboard screenshots
 - **SUE is a proxy, not literal consensus surprise.** Analyst estimate data
   is proprietary; this is the standard academic workaround and is named
   explicitly here rather than presented as ground truth.
+- **Revenue reporting tags vary across companies and time** (ASC 606
+  adoption ~2018 changed XBRL tagging industry-wide); the fetch script
+  falls back across multiple known tags, but 2 companies (banks, which
+  report interest income rather than standard revenue) are excluded.
 - **Survivorship bias**: universe drawn from current S&P 500 constituents,
   so delisted/failed companies are excluded.
 - **Sector sample sizes vary** (e.g. Energy and Real Estate have fewer
@@ -60,5 +70,6 @@ figures/      SHAP plots, model diagnostics, dashboard screenshots
 
 ## Status
 
-🚧 In progress — data pipeline and modeling stage.
-
+✅ Data pipeline, feature engineering, and modeling complete.
+🚧 Next: SHAP interpretability analysis (global + per-sector + local
+explanations).
