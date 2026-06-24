@@ -25,13 +25,9 @@ Can fundamentals-based features predict the *magnitude* of a company's earnings 
 
 ```
 data/         raw + processed datasets (EDGAR pulls, engineered features)
-
 scripts/      data fetching, feature engineering, modeling pipeline
-
 notebooks/    exploratory analysis, SHAP visualization
-
 output/       trained models, prediction outputs, metrics
-
 figures/      SHAP plots, model diagnostics, dashboard screenshots
 ```
 
