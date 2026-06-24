@@ -3,12 +3,16 @@ Vercel Python serverless function (BaseHTTPRequestHandler convention).
 
 GET /api/predict?ticker=AAPL&end=2023-09-30
 
-Uses a scikit-learn HistGradientBoostingRegressor (not LightGBM) for the
-live deployment specifically, since LightGBM's compiled binary requires
-libgomp, which isn't available in Vercel's Python runtime. The research
-pipeline (scripts/train_model.py) still uses LightGBM — this is a
-deployment-only swap, with near-identical performance (RMSE 0.68 vs 0.68,
-~88% directional accuracy vs ~89%).
+Uses a scikit-learn HistGradientBoostingRegressor for live predictions.
+Feature attribution is computed via a self-contained ablation method
+(perturb each feature to the training median one at a time, measure the
+shift in prediction) rather than the `shap` library, since `shap` could
+not be reliably installed in Vercel's Python serverless runtime (likely a
+C-extension build/timeout issue). This is a standard, simpler alternative
+to SHAP — sometimes called occlusion-based or ablation-based attribution —
+and is noted explicitly here as a deployment-environment workaround. The
+research pipeline (notebooks/SHAP analysis) still uses the full `shap`
+library locally, where there's no such constraint.
 """
 
 import os
@@ -16,7 +20,6 @@ import json
 import joblib
 import pandas as pd
 import numpy as np
-import shap
 from http.server import BaseHTTPRequestHandler
 from urllib.parse import urlparse, parse_qs
 
@@ -31,30 +34,24 @@ NUMERIC_FEATURES = [
     "net_margin_sector_z", "revenue_growth_sector_z",
 ]
 CATEGORICAL_FEATURES = ["sector"]
-ALL_FEATURES = NUMERIC_FEATURES + ["sector_enc"]
 
 _model = None
 _encoder = None
 _df = None
-_explainer = None
+_medians = None
 
 
 def _load():
-    global _model, _encoder, _df, _explainer
+    global _model, _encoder, _df, _medians
     if _model is None:
         bundle = joblib.load(MODEL_PATH)
         _model = bundle["model"]
         _encoder = bundle["encoder"]
     if _df is None:
-        df = pd.read_csv(DATA_PATH, parse_dates=["end"])
-        _df = df
-    if _explainer is None:
-        # Model-agnostic explainer (works for sklearn HistGradientBoosting,
-        # unlike TreeExplainer which is LightGBM/XGBoost-specific)
-        background = _df[NUMERIC_FEATURES].median().to_frame().T
-        background["sector_enc"] = 0
-        _explainer = shap.Explainer(_model.predict, background)
-    return _model, _encoder, _df, _explainer
+        _df = pd.read_csv(DATA_PATH, parse_dates=["end"])
+    if _medians is None:
+        _medians = _df[NUMERIC_FEATURES].median()
+    return _model, _encoder, _df, _medians
 
 
 def _make_X(row):
@@ -63,8 +60,42 @@ def _make_X(row):
     return X
 
 
+def _ablation_contributions(model, X_row, medians):
+    """
+    For each numeric feature, replace it with the training-set median and
+    measure how much the prediction shifts. The shift (full_pred - ablated_pred)
+    is attributed to that feature's deviation from "typical".
+    Sector is handled separately as a single categorical contribution by
+    comparing to a neutral/most-common sector encoding.
+    """
+    full_pred = float(model.predict(X_row)[0])
+    contributions = []
+
+    for feat in NUMERIC_FEATURES:
+        X_ablated = X_row.copy()
+        X_ablated[feat] = medians[feat]
+        ablated_pred = float(model.predict(X_ablated)[0])
+        contributions.append({
+            "feature": feat,
+            "value": round(full_pred - ablated_pred, 4),
+            "raw_value": None,  # filled in by caller
+        })
+
+    # Sector: ablate by setting to the most common sector code (mode-like neutral)
+    X_ablated_sector = X_row.copy()
+    X_ablated_sector["sector_enc"] = 0  # arbitrary neutral baseline
+    ablated_sector_pred = float(model.predict(X_ablated_sector)[0])
+    contributions.append({
+        "feature": "sector",
+        "value": round(full_pred - ablated_sector_pred, 4),
+        "raw_value": None,
+    })
+
+    return full_pred, contributions
+
+
 def _predict_one(ticker, end):
-    model, encoder, df, explainer = _load()
+    model, encoder, df, medians = _load()
 
     rows = df[df["ticker"] == ticker]
     if end:
@@ -78,31 +109,23 @@ def _predict_one(ticker, end):
     row = rows.iloc[[0]]
     X = _make_X(row)
 
-    predicted = float(model.predict(X)[0])
+    predicted, contributions = _ablation_contributions(model, X, medians)
+
     actual_raw = row["sue"].iloc[0]
     actual = float(actual_raw) if pd.notna(actual_raw) else None
 
-    shap_result = explainer(X)
-    shap_values = shap_result.values[0]
-    base_value = float(np.array(shap_result.base_values).flatten()[0])
-
-    contributions = []
-    for i, feat in enumerate(ALL_FEATURES):
-        if feat == "sector_enc":
-            raw_val = str(row["sector"].iloc[0])
-            label = "sector"
+    # Fill in raw values for display
+    for c in contributions:
+        if c["feature"] == "sector":
+            c["raw_value"] = str(row["sector"].iloc[0])
         else:
-            raw_val = row[feat].iloc[0]
+            raw_val = row[c["feature"]].iloc[0]
             if hasattr(raw_val, "item"):
                 raw_val = raw_val.item()
             if isinstance(raw_val, float) and np.isnan(raw_val):
                 raw_val = None
-            label = feat
-        contributions.append({
-            "feature": label,
-            "value": round(float(shap_values[i]), 4),
-            "raw_value": raw_val,
-        })
+            c["raw_value"] = raw_val
+
     contributions.sort(key=lambda c: abs(c["value"]), reverse=True)
 
     return {
@@ -111,7 +134,9 @@ def _predict_one(ticker, end):
         "sector": str(row["sector"].iloc[0]),
         "actual_sue": round(actual, 4) if actual is not None else None,
         "predicted_sue": round(predicted, 4),
-        "base_value": round(base_value, 4),
+        "base_value": round(float(model.predict(
+            pd.DataFrame([medians.to_dict() | {"sector_enc": 0}])
+        )[0]), 4),
         "contributions": contributions,
     }
 
