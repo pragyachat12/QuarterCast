@@ -19,9 +19,11 @@ from sklearn.metrics import mean_squared_error, mean_absolute_error
 import lightgbm as lgb
 import joblib
 
-FEATURES_PATH = "data/model_features.csv"
+FEATURES_PATH = "model_features.csv"
 MODEL_OUTPUT_PATH = "../output/lgbm_model.pkl"
-RIDGE_OUTPUT_PATH = "../output/ridge_model.pkl"
+RIDGE_OUTPUT_PATH = ".." \
+"" \
+"/output/ridge_model.pkl"
 
 NUMERIC_FEATURES = [
     "revenue_yoy_growth", "net_income_yoy_growth", "revenue_qoq_growth",
